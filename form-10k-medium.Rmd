@@ -1,0 +1,420 @@
+Applying text mining principles to analysing company risk factors (form 10K) in R
+
+I got interested in text mining while I was a newbie to R. This (https://www.tidytextmining.com/) website/ book from David Robinson and Julia Silge got me learning most of the techniques such as 'tf-idf', 'n-grams' and 'topic modeling' that can be used to extract meaning from a corpus of text. We will cover some of these techniques in the analysis below.
+
+Being in the domain of risk management, I have also sought to understand how text mining could be applied to some of the work that I do. On the professional side, I have been involved in advising organizations on risks and methods to mitigate or manage them. One of the most useful reading sources of risks that I have found is the annual 10K filings that US-Listed organizations file. In it, there is a section titled 'risk factors' wherein organizations list down various risk factors impacting their businesses. It usually runs to anywhere between 5-15 pages and lists down, in a narrative format, risks which organizations believe may impact their business performance. Some of these risks are generic (such as a decline in customer demand) while some risks may be very specific to the business, geography or technology that the company works in. It could be external risks or it could be internal risks. As such, if written up well by the company, this section of the form 10k gives valuable insights into the companies business. For me, it has served as weekend reading material for many a weekends! [Yes, my weekends are that interesting!]
+
+There, we come to my motivation behind this analysis. I want to evaluate if by applying some text mining principles, I can eek out any specific insights which I may miss by just reading through a bunch of these documents. Needless to say, I would caution that text mining such as what I am about to do can hardly form a replacement for plain reading and comprehension! For this analysis, I use four key R packages:
+1. 'tidyverse' that bundles a lot of data wrangling and visualisation packages,
+2. 'edgar' that allows us to access and download filings from the US Security Exchange Commission's EDGAR database. The EDGAR database, short for "Electronic Data Gathering, Analysis, and Retrieval system" contains publicly available information, including specifically, the form-10K that we are specifically looking for, and
+3. 'tidytext' that has several in-built functions that allow us to conduct text mining operations
+4. 'rvest' that allows for certain cleaning and reading functions from html in this analysis
+
+A Form 10-K is an annual report filed by US listed organization and is a requirement by the U.S. Securities and Exchange Commission (SEC). It gives a summary of a company's financial performance including other elements such as organization history, its structure, executive compensation, financial statements etc. I will include the snapshots of the R-code and outputs as we go along. For this analysis, we will use two US-listed companies - Walmart, Inc. (WMT) and  The Home Depot, Inc (HD). The intention behind this is to understand if we can note any differences between the way the two companies consider risks. Both these consumer product organizations are among the top 20 companies in the US by market capitalisation, in fairly similar industry contexts and with a wide geographical footprint. We will also analyse the risk factors for three years for each of these organizations with an intention to see if the nature of risks have moved over the years.
+
+First, let us set-up the analysis by installing and/or loading the required packages. I am using an R-markdown notebook.
+
+```{r}
+library(tidyverse)
+#install.packages("edgar")
+library(edgar)
+library(tidytext)
+library(rvest)
+
+```
+
+The next step that we need to do is to get the filing information for each of the companies and choose the form. Since we are analysing two companies, over a three year period, we need six filings. One simple way to do this would be to individually extract the risk factors, save it in a text file and then conduct the analysis from there. The 'edgar' package and some of the cleaning scripts allow me to slightly automate this part of the analysis. We need the CIK number (Central Index Key), the year and the quarters in which the filings were done to extract the information. The CIK for WMT is 0000104169 and CIK for HD is #0000354950 Using the function getFilingInfo() one can get to see which quarters was form 10-k filed and then use 'these'getFilingHTML() to download an html format of the file.
+
+
+```{r}
+#Finding quarter in which form 10k was filed and downloading it for three years
+  #WMT
+  getFilingInfo(104169, 2020, 1)
+
+  getFilingsHTML(104169, '10-K', 2020, 1)
+  getFilingsHTML(104169, '10-K', 2019, 1)
+  getFilingsHTML(104169, '10-K', 2018, 1)
+
+  #HD
+  
+  getFilingInfo(354950, 2020, 1)
+  
+  getFilingsHTML(354950, '10-K', 2020, 1)
+  getFilingsHTML(354950, '10-K', 2019, 1)
+  getFilingsHTML(354950, '10-K', 2018, 1)
+
+```  
+
+Next, we read the files that we downloaded and extract the risk factors from them. This is a slightly more elaborate routine which depends on the formats in which the reports have been filed. I wont display the codes here, but for those interested, you can retrieve it from this link. Ultimately what we need is a data frame that contains the risks. The order does not matter since we will eventually 'tokenize' them for further analysis. We also need two additional columns for identifying the company name and the year. This is how the combined dataset looks like.
+
+
+```{r}
+#reading  - walmart
+wmt_2020 <- read_html(choose.files())
+wmt_2019 <- read_html(choose.files())
+wmt_2018 <- read_html(choose.files())
+
+
+#extract risk factors
+#Walmart 2020 
+wmt_2020_extract <- wmt_2020 %>% 
+  html_nodes("div") %>%
+  html_text() %>% 
+  tibble::enframe(name = NULL) %>% 
+  mutate(risk_factors_link = if_else(str_detect(value, "RISK FACTORS") == TRUE, row_number(),NULL),
+         next_item_link = if_else(str_detect(value, "UNRESOLVED STAFF COMMENTS") == TRUE, row_number(),NULL))
+
+#get slicing levels
+wmt_2020_extract %>% 
+  filter(!is.na(risk_factors_link) | !is.na(next_item_link))
+  
+wmt_2020_extract_final <- wmt_2020_extract %>% 
+  slice(768:900) %>%
+  unnest_tokens(word, value) %>% 
+  anti_join(stop_words) %>% 
+  mutate(company = "walmart",
+         year = 2020) %>% 
+  select(word, company, year)
+  
+#Walmart 2019
+wmt_2019_extract <- wmt_2019 %>% 
+  html_nodes("div") %>%
+  html_text() %>% 
+  tibble::enframe(name = NULL) %>% 
+  mutate(risk_factors_link = if_else(str_detect(value, "RISK FACTORS") == TRUE, row_number(),NULL),
+         next_item_link = if_else(str_detect(value, "UNRESOLVED STAFF COMMENTS") == TRUE, row_number(),NULL))
+
+#get slicing levels
+wmt_2019_extract %>% 
+  filter(!is.na(risk_factors_link) | !is.na(next_item_link))
+  
+wmt_2019_extract_final <- wmt_2019_extract %>% 
+  slice(1978:2109) %>%
+  unnest_tokens(word, value) %>% 
+  anti_join(stop_words) %>% 
+  mutate(company = "walmart",
+         year = 2019)%>% 
+  select(word, company, year)
+  
+
+#Walmart 2018
+wmt_2018_extract <- wmt_2018 %>% 
+  html_nodes("div") %>%
+  html_text() %>% 
+  tibble::enframe(name = NULL) %>% 
+  mutate(risk_factors_link = if_else(str_detect(value, "RISK FACTORS") == TRUE, row_number(),NULL),
+         next_item_link = if_else(str_detect(value, "UNRESOLVED STAFF COMMENTS") == TRUE, row_number(),NULL))
+
+#get slicing levels
+wmt_2018_extract %>% 
+  filter(!is.na(risk_factors_link) | !is.na(next_item_link))
+  
+wmt_2018_extract_final <- wmt_2018_extract %>% 
+  slice(2210:2348) %>%
+  unnest_tokens(word, value) %>% 
+  anti_join(stop_words) %>% 
+  mutate(company = "walmart",
+         year = 2018)%>% 
+  select(word, company, year)
+
+
+
+
+
+
+#reading  - home depot
+hd_2020 <- read_html(choose.files())
+hd_2019 <- read_html(choose.files())
+hd_2018 <- read_html(choose.files())
+
+
+#extract risk factors
+#home depot 2020 
+hd_2020_extract <- hd_2020 %>% 
+  html_nodes("div") %>%
+  html_text() %>% 
+  tibble::enframe(name = NULL) %>% 
+  mutate(risk_factors_link = if_else(str_detect(value, "Risk Factors") == TRUE, row_number(),NULL),
+         next_item_link = if_else(str_detect(value, "Unresolved Staff Comments") == TRUE, row_number(),NULL)) %>% 
+  filter(value != "Table of Contents")
+
+#get slicing levels
+hd_2020_extract %>% 
+  filter(!is.na(risk_factors_link) | !is.na(next_item_link))
+  
+hd_2020_extract_final <- hd_2020_extract %>% 
+  slice(485:596) %>%
+  unnest_tokens(word, value) %>% 
+  anti_join(stop_words) %>% 
+  mutate(company = "home_depot",
+         year = 2020)%>% 
+  select(word, company, year)
+  
+#home depot 2019 
+hd_2019_extract <- hd_2019 %>% 
+  html_nodes("div") %>%
+  html_text() %>% 
+  tibble::enframe(name = NULL) %>% 
+  mutate(risk_factors_link = if_else(str_detect(value, "Risk Factors") == TRUE, row_number(),NULL),
+         next_item_link = if_else(str_detect(value, "Unresolved Staff Comments") == TRUE, row_number(),NULL)) %>% 
+  filter(value != "Table of Contents")
+
+#get slicing levels
+hd_2019_extract %>% 
+  filter(!is.na(risk_factors_link) | !is.na(next_item_link))
+  
+hd_2019_extract_final <- hd_2019_extract %>% 
+  slice(471:571) %>%
+  unnest_tokens(word, value) %>% 
+  anti_join(stop_words) %>% 
+  mutate(company = "home_depot",
+         year = 2019)  %>% 
+  select(word, company, year)
+  
+
+#home depot 2018
+hd_2018_extract <- hd_2018 %>% 
+  html_nodes("div") %>%
+  html_text() %>% 
+  tibble::enframe(name = NULL) %>% 
+  mutate(risk_factors_link = if_else(str_detect(value, "Risk Factors") == TRUE, row_number(),NULL),
+         next_item_link = if_else(str_detect(value, "Unresolved Staff Comments") == TRUE, row_number(),NULL)) %>% 
+  filter(value != "Table of Contents")
+
+#get slicing levels
+hd_2018_extract %>% 
+  filter(!is.na(risk_factors_link) | !is.na(next_item_link))
+  
+hd_2018_extract_final <- hd_2018_extract %>% 
+  slice(453:552) %>%
+  unnest_tokens(word, value) %>% 
+  anti_join(stop_words) %>% 
+  mutate(company = "home_depot",
+         year = 2018)%>% 
+  select(word, company, year)
+
+risk_factors <- rbind(wmt_2020_extract_final, wmt_2019_extract_final, wmt_2018_extract_final,
+      hd_2020_extract_final, hd_2019_extract_final, hd_2018_extract_final)
+
+```
+
+The cleaning and extracting the risk factors can seem quite a tedious exercise and at a point it did seem daunting. Like its said, data science is 90% about getting your data ready. Anyway, now that we have our text data ready, lets see what analysis can we do on it. There are five aspects that I have found interesting early on:
+
+1. Pure word counts
+Though a very simplistic approach to text mining, understanding word frequencies can help assess what are typical words that form in the library of the corpus and the general sense of topics or issues that are being spoken about. For this, we can do a simple bar plot of the frequency of words and analyse it across companies and across years. A simple ggplot code can get us this answer:
+
+```{r}
+
+risk_factors %>%
+  mutate(company_year = paste0(company," (",year,")")) %>% 
+  group_by(company_year, word) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count)) %>% 
+  top_n(10) %>%
+  ungroup() %>% 
+  mutate(word = reorder_within(word, count, within = company_year)) %>% 
+  ggplot(aes(x = word, y = count, fill = company_year))+
+  geom_col()+
+  coord_flip()+
+  scale_x_reordered()+
+  facet_wrap(~company_year, scales = "free_y")+
+  theme_minimal()+
+  theme(legend.position = "none")+
+  labs(title = "Most frequent words stated in risk factors",
+       y = "word frequencies")
+
+risk_factors %>% 
+  count(company)
+
+```
+
+A few things we could draw out from this analysis:
+1. Home depot's risks call out specifically aspects around "products", "costs", "financial", "business" etc.
+2. Walmart talks about "operations", "financial", "information", "laws", "customers
+3. The frequency of repetition is much higher in walmart than in home depot. This is probably because walmart has a more lengthy risk factors statement (12K words over three years) than Home Depot (7.5K words over three years), excluding common words
+4. This analysis could probably be better analysed through the elimination of common 'risk neutral' words such as "service", "products", "including" etc. as also certain risk adjectives which we would expect to be heavily used. Thus we find words such as "adversely", "affect" etc. in the most commonly cited words. We will however move forward to other (and hopefully more interesting) analyses.
+
+
+2. Analysing bi-grams
+Individual words by themselves may have limited context. Two words can provide more context than a single word. So 'information' by itself may mean something and 'system' may mean something. But 'information system' by itself may mean something much more specific. We could extend the word frequencies which we analysed above to extend to a set of 2, 3 or more words. These are called as "bigrams", "trigrams" and so on. This would hopefully provide more context to the words. Let us analyse and visualise it in the form of a network plot (inspiration for this and many other plots on this article is from the tidytextmining website quoted earlier written by David Robinson and Julia Silge). Let's pick up the latest year's risk factors (please note that while the annual report would have been filed in 2020, it would pertain to a year that ends in an earlier month or quarter. Walmart's fiscal year for 2020 ended on 31st January while Home Depot's ended on February 2nd, 2020)
+Here's how bi-grams get computed and visualised using a network plot. We will use two additional packages 'igraph' and 'ggraph'. We will also be using an interim extracted data for this analysis. We will focus on word-combinations that appear more than three times.
+
+
+```{r}
+library(igraph)
+library(ggraph)
+
+bigrams_data_fn <- function(bigram_data) {
+  
+  bigram_data %>%
+  select(value) %>% 
+  unnest_tokens(bigram, value, token = "ngrams", n = 2) %>% 
+  separate(bigram, sep = " ", into = c("word1","word2")) %>% 
+  filter(!word1 %in% stop_words$word,
+         !word2 %in% stop_words$word)
+}
+
+visualising_bigrams <- function(bigram_risk){
+  set.seed(1234)
+  
+  bigram_risk %>%
+  count(word1, word2, sort = TRUE) %>% 
+  filter(n > 3 ) %>% 
+  graph_from_data_frame() %>% 
+  ggraph(layout = "fr")+
+  geom_edge_link(aes(edge_alpha = n))+
+  geom_node_point()+
+  geom_node_text(aes(label = name), vjust =1, hjust = -0.2)
+  }
+
+wmt_2020_extract %>% 
+  slice(768:900) %>%
+  bigrams_data_fn() %>% 
+  visualising_bigrams()+
+  labs(title = "Walmart 2020 Bigrams")+
+  theme_void()
+
+hd_2020_extract %>% 
+  slice(485:596) %>% 
+  bigrams_data_fn() %>% 
+  visualising_bigrams()+
+  labs(title = "Home Depot 2020 Bigrams")+
+  theme_void()
+
+```
+
+We can gather just a few more insights from this, for example:
+1. Walmart speaks about information, in the context of 'information systems', 'personal information' and 'confidential information'. In the word frequencies we analysed earlier, information appeared as a single word. Now we can put more context to it.
+2. Similarly, we find strong risk elements such as "currency rates", international operations and ratail/ pharmacy operations also being focal points of output. Similarly we find other elements such as market or competitive positions, shopping patterns and experiences which give a glimpse of some of the other areas of risks that walmart speaks about.
+3. At home-depot, we find mention of words such as "covid-19", "responsible sourcing", "proprietary products" etc. finding a mention. 
+
+Analysing the risk factors database through the lens of bigrams does offer more advantages. Both in combination can provide us with more contextual understanding of key risks.
+
+
+3. Relative importance of terms between two documents.
+Another way to analyse a set of text documents is through the use of term-frequency-inverse-document-frequency or tf-idf metric. You can know more about tf-idf here (https://www.tidytextmining.com/tfidf.html#the-bind_tf_idf-function). This is applied to find 'important' words in a document. i.e. some common words may appear across documents while some words may be unique to a certain set of documents. We would want to find out what are some of the words that are uniquely contextual to a particular document. For instance, in our analysis, certain risk factor terms may appear both in Walmart's document as well as in Home- Depot's document. But we may want to analyse what is unique to Walmart and Home Depot, vis-a-vis each other. This is where we use a simple bind_tf_idf() function which is available in the tidy text package. This will provide the 'tf_idf' score which we will then simply plot for the top 10 instances
+
+
+```{r}
+#tf-idf analysis
+
+tf_idf_risk <- risk_factors %>% 
+  count(word, company) %>% 
+  bind_tf_idf(word, company, n)
+
+tf_idf_risk %>% 
+  group_by(company) %>% 
+  top_n(n = 10, tf_idf) %>% 
+  ungroup() %>%
+  mutate(word = reorder_within(word, n, company)) %>% 
+  ggplot(aes(x = word, y = tf_idf, fill = company))+
+  geom_col()+
+  coord_flip()+
+  scale_x_reordered()+
+  facet_wrap(~company, scales = "free_y")+
+  theme_minimal()+
+  theme(legend.position = "none")+
+  labs(title = "Which risk factor terms are uniquely associated: Home Depot compared to Walmart",
+       subtitle = "Parsed from documents between 2018 to 2020",
+       y = "tf_idf score")
+
+```
+
+This gives us some glimpse of the varied focus. Home depot talks about proprietary products, square footage (I assume that it pertains to some sort of real-estate related risks. Which can also be surmised from other words such as "leased" and maybe "develop"). Words like "challenges", "assumptions", "impair" do not by themselves offer much. Likewise at Walmart, words such as sell, ecommerce and pharmacy have a high score. "Club" and "Clubs" most likely stand for Sam's club, the omnichannel initiative of Walmart. What can be well understood from this is the focus that ecommerce gets in the risk factors - which is not unlikely considering the risk that ecommerce in general and Amazon in particular poses to Walmart. So our text mining, with a bit of context, actually helps us parse through words and understand what the risk factors section of the annual reports of companies really want to tell us!
+
+We can also extend this analysis to see how have companies risk factors evolved or moved over time. i.e. what was unique between the years. Lets conduct this analysis just for walmart and over the three years (2018-2020).
+
+```{r}
+
+tf_idf_risk <- risk_factors %>%
+  filter(company == "walmart") %>% 
+  count(word, year) %>% 
+  bind_tf_idf(word, year, n)
+
+tf_idf_risk %>% 
+  group_by(year) %>% 
+  top_n(n = 10, tf_idf) %>% 
+  ungroup() %>%
+  mutate(word = reorder_within(word, n, year)) %>% 
+  ggplot(aes(x = word, y = tf_idf, fill = year))+
+  geom_col()+
+  coord_flip()+
+  scale_x_reordered()+
+  facet_wrap(~year, scales = "free_y")+
+  theme_minimal()+
+  theme(legend.position = "none")+
+  labs(title = "Which risk factor terms are uniquely associated with each year: For Walmart, Inc.",
+       subtitle = "Parsed from documents between 2018 to 2020",
+       y = "tf_idf score")
+
+
+```
+
+
+Again, some important elements that can be understood from this analysis include:
+1. Focus on GDPR, EU, California (perhaps in the context of data privacy) being cited here. For those of us in the risk profession, we know that this was an important area / legislation that was enacted or is expected to be enacted across the globe.
+2. 2018 had several 'uniquely important' words such as "subsidiaries", "brazil" - which can be used to further understand in what context they were called out. Let's check on Brazil:
+
+```{r}
+wmt_2018_extract %>% 
+  slice(2210:2348) %>%  
+  filter(str_detect(value, "Brazil")) %>% 
+  pull(value)
+
+
+```
+
+[1] "In addition to our U.S. operations, we operate our retail business principally through wholly-owned subsidiaries in Argentina, Brazil, Canada, Chile, China, India, Japan and the United Kingdom and our majority-owned subsidiaries in Africa, Central America and Mexico."     
+[2] "Brazilian federal, state and local laws are complex and subject to varying interpretations.  Although the Company believes it complies with those laws, the Company's subsidiaries in Brazil are party to a large number of labor claims and non-income tax assessments, which have arisen during the normal course of business in Brazil.  These matters are subject to inherent uncertainties and if decided adversely to the Company, could materially adversely affect our financial performance."    
+[3] "Inquiries or investigations regarding allegations of potential FCPA violations have been commenced in a number of foreign markets in which we operate, including, but not limited to, Brazil, China and India.  In November 2011, we voluntarily disclosed our investigative activity to the U.S. Department of Justice (the \"DOJ\") and the SEC.  We have been cooperating with those agencies and discussions have been ongoing with them regarding the resolution of these matters.  These discussions have progressed to a point that we can now reasonably estimate a probable loss and have recorded an aggregate accrual of $283 million with respect to these matters (the \"Accrual\").
+
+The term Brazil was cited in three different contexts, but the most significant element seems to be in the context of regulatory risks that of labour laws and FCPA allegations. Again, a uniquely interesting extraction that text mining through tf-idf helped us get.
+
+
+4. Topic modeling
+This last part of our analysis does not conceptually bode well into the risk factors analysis, but I wanted to see where the application of this algorithm leads me. Topic modeling is an unsupervised classification of documents which finds a natural grouping of items. More on this here. (https://www.tidytextmining.com/topicmodeling.html). Though each of our set of documents i.e. the company-year corpus of risk words that we have identified are not a singular topic, but a multitude set of them, it does not offer itself directly to the concept of topic modeling. Nevertheless, no harm in trying. I have used here the same logic and sequence used in the tidytext mining website. I won't get into the mechanics of the model itself here. The end result that I am looking for is a set of five topics that 
+
+##Topic modeling
+
+```{r}
+
+#install.packages("topicmodels")
+library(topicmodels)
+
+risk_lda_model <- risk_factors %>%
+  mutate(company_year = paste0(company," (",year,")")) %>% 
+  count(company_year, word) %>% 
+  cast_dtm(company_year, word, n) %>% 
+  LDA(k = 6, control = list(seed = 1234)) %>% 
+  tidy()
+
+
+risk_lda_model %>% 
+  group_by(topic) %>% 
+  top_n(10) %>% 
+  ungroup() %>%
+  arrange(topic, -beta) %>%
+  mutate(term = reorder_within(term, beta, within = topic)) %>% 
+  ggplot(aes(x = term, y = beta, fill = topic))+
+  geom_col()+
+  coord_flip()+
+    scale_x_reordered()+
+  facet_wrap(~topic, scales = "free_y")+
+  theme_minimal()+
+  theme(legend.position = "none")+
+  labs(title = "Nine topics selected from the corpus of risk factors",
+       subtitle = "Walmart Inc and Home Depot Inc, from 2018 to 2020",
+       y = "beta")
+  
+```
+
+Well, nothing particularly insightful here! We win some, we lose some. I suspect that this is primarily because each set of documents has a number unique topics within each of them that it really does not parse out key topics out that generically explains the entire corpus. So now we know that topic modeling may not be useful for such documents(I wanted to extract something positive from this!)
+
+Another typical text based analysis that is done is a sentiment analysis. Considering that this is risk factors which we are dealing with, we can expect the sentiment to be on the negative side! Looking at words such as "adcversely", "affect", "risk" etc. would be enough to understand that a sentiment analysis may not be a useful technique as well.
+
+In summary, the word frequencies, combined with the n-gram analysis and the tf-idf analysis do help parse out the risk factors quite well. It does not offer very specific conclusions, but it does help point out areas of interest which can be probed further for a targeted reading or more nuanced analysis. I hope you found this useful!
+
+The R code for the above analysis can be found here.
+
+
+
